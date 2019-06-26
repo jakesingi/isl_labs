@@ -1,0 +1,283 @@
+---
+title: "classification_isl.Rmd"
+output: github_document
+---
+
+# ISL Lab: Classification
+
+```{r}
+library(ISLR)
+```
+
+```{r}
+dim(Smarket)
+head(Smarket)
+summary(Smarket)
+```
+
+```{r}
+pairs(Smarket)
+```
+
+Lots of randomness. 
+
+```{r}
+cor(Smarket[, 1:8])
+```
+
+Noticeable correlation between `Year` and `Volume`. There doesn't seem to be much of a relationship between the `Lag`s themselves or between them and `Today`.
+
+```{r}
+plot(Smarket$Volume, ylab = 'Volume')
+```
+
+Volume appears to gradually be increasing over time here.
+
+## Goal: predict `Direction` using the `Lag`s and `Volume`.
+
+### Logistic Regression
+
+```{r}
+# Setting family=binomial ensures we use logistic regression
+glm.fit = glm(Direction~Lag1+Lag2+Lag3+Lag4+Lag5+Volume, data=Smarket, family=binomial)
+summary(glm.fit)
+```
+
+None of the p-values are significant. The lowest belongs to `Lag1`, which makes sense because it represents the most recent predictor to today, but it is still high. These results mean there may not be a relationship between `Direction` and our predictors.
+
+```{r}
+# Show sample predictions
+contrasts(Smarket$Direction)  # 1 = Up and 0 = Down
+predictions = predict(glm.fit, type='response')
+up_down_vec = rep("Up", 1250)
+up_down_vec[predictions < 0.5] = 'Down'
+
+# Now create a confusion matrix to see where our classifier went wrong
+table(up_down_vec, Smarket$Direction)
+```
+
+Overall, our model was correct at rate (145+507)/1250=0.52, implying the error rate is 0.48. Looking deeper, the matrix shows that of the 141+507=648 days in which the market went up, our model also predicted up at rate 507/648=0.78. Of the 145+457=602 days in which the market went down, our model predicted down 145/602 times, for a rate of 0.24. 
+
+Now, let's see how our model performs if we test it on a test set. 
+
+```{r}
+# Split into train and test
+train = Smarket[Smarket$Year < 2005,]
+test = Smarket[Smarket$Year==2005,]
+```
+
+```{r}
+# Model
+glm.fit = glm(Direction~Lag1+Lag2+Lag3+Lag4+Lag5+Volume, data=train, family=binomial)
+glm.probs = predict(glm.fit, test, type='response')
+```
+
+```{r}
+# Prepare confusion matrix
+glm.pred = rep('Down', 252)
+glm.pred[glm.probs > 0.5] = 'Up'
+table(glm.pred, Smarket[Smarket$Year==2005, 'Direction'])
+
+# Test error rate
+sum(glm.pred != Smarket[Smarket$Year==2005, 'Direction'])/nrow(test)
+```
+
+The test error rate of approximately 52% is worse than the train error rate, which we expect. This is worse than random guessing.
+
+What if we test a classifier that just uses `Lag1`, the predictor with the lowest p-value, to train a logistic regression model?
+
+```{r}
+# Train and then make predictions
+glm_1_pred = glm(Direction~Lag1, data=train, family=binomial)
+glm_1_pred_probs = predict(glm_1_pred, test, type='response')
+
+# Confusion matrix
+glm_1_pred_preds = rep('Up', 252)
+glm_1_pred_preds[glm_1_pred_probs < 0.5] = 'Down'
+table(glm_1_pred_preds, test[, 'Direction'])
+```
+
+And so now, our error rate is 116/252 = 46% approximately. This is an improvement. It may be interesting to see how correct we are when our model predicted the market to go up. This rate is 116/(116+91) = 56% approximately. Since this number is better than what we'd expect from just flipping a coin, this model could be useful to someone looking for a trading strategy, although this analysis is very surface level and would need more work.
+
+### Linear Discriminant Analysis (LDA)
+
+```{r}
+# lda() function is part of MASS library
+library(MASS)
+lda.fit = lda(Direction~Lag1+Lag2, data=train)
+lda.fit
+```
+
+```{r}
+# plots linear discriminants, obtained by using all of the training observations
+plot(lda.fit)
+```
+
+```{r}
+# predictions
+lda.pred = predict(lda.fit, test)
+lda.class = lda.pred$class
+table(lda.class, test$Direction)
+
+1 - (sum(lda.class == test$Direction)/nrow(test))  # error rate
+```
+
+```{r}
+# Using threshold 0.5, we can recreate the "row sums" in the table to check our understanding:
+num_downs = sum(lda.pred$posterior[, 1] >= 0.5)  # 35+35=70
+num_ups = sum(lda.pred$posterior[, 1] < 0.5)  # 76+106=182
+num_downs
+num_ups
+```
+
+```{r}
+# we see that in the first column of posterior we check P(Down) using threshold 0.5 to make decisions
+lda.pred$posterior[1:20, 1]
+lda.pred$class[1:20]
+```
+
+Let's say we wanted to use a different thershold, and to me it makes sense to check P(Down) using a low threshold, since with our market trading habits, it seems wiser to be conservative. For example, let's use 0.3 as our threshold.
+
+```{r}
+sum(lda.pred$posterior[, 1] >= 0.3)  # number of Downs
+sum(lda.pred$posterior[, 1] < 0.3)  # number of Ups
+```
+
+Wow! We wouldn't predict the market to go Up in any case here. Let's just see what the min probability is for fun...
+
+```{r}
+min(lda.pred$posterior[,1])
+```
+
+So about 0.46 was the lowest probability we predicted for the market to go Down. The 0.3 threshold may have been overkill!
+
+### Quadratic Discriminant Analysis (QDA)
+
+```{r}
+# QDA model
+qda_fit = qda(Direction~Lag1+Lag2, data=train)
+qda_fit
+```
+
+```{r}
+# predictions and error rate
+qda_preds = predict(qda_fit, test)
+1-(sum(qda_preds$class == test$Direction)/nrow(test))
+```
+
+This error rate is better than that of LDA. Cool!
+
+### K-Nearest Neighbors (KNN)
+
+```{r}
+# knn() function is in the class library
+library(class)
+# Make train and test sets
+X_train = cbind(train$Lag1, train$Lag2)
+X_test = cbind(test$Lag1, test$Lag2)
+```
+
+```{r}
+set.seed(1)
+# fit and predict
+knn_preds = knn(X_train, X_test, train$Direction, k=1)
+table(knn_preds, test$Direction)
+
+# error rate
+1 - ((83+43)/252)
+```
+
+This 0.5 error rate isn't so good, probably because we overfit with the choice of `k=1` neighbor considered. Let's try `k=3`.
+
+```{r}
+# fit and predict
+knn_preds = knn(X_train, X_test, train$Direction, k=3)
+table(knn_preds, test$Direction)
+
+# error rate
+1 - ((48+87)/252)
+```
+
+This error rate of 0.46 is better, but still not as good as the QDA fit from earlier. The QDA choice may have been best!
+
+### KNN on different data set
+
+In this part of the lab, we want to predict if a given person purchased caravan insurance or not. We'll use the Caravan data set.
+
+```{r}
+dim(Caravan)
+#head(Caravan)
+```
+
+```{r}
+sum(Caravan$Purchase == 'Yes')/nrow(Caravan)
+```
+
+So, only 6% of people bought caravan insurance.
+
+```{r}
+# Standardize the data to avoid issues with KNN distances. This means giving all variables a mean of 0 and variance of 1.
+X_standardized = scale(Caravan[, -86])
+
+# check
+var(X_standardized[, 3])
+var(X_standardized[, 4])
+mean(X_standardized[, 3])
+mean(X_standardized[, 4])
+```
+
+```{r}
+# split data
+test_indices = 1:1000
+X_train = X_standardized[-test_indices, ]
+X_test = X_standardized[test_indices, ]
+y_train = Caravan$Purchase[-test_indices]
+y_test = Caravan$Purchase[test_indices]
+
+# make predictions
+set.seed(1)
+knn_preds = knn(X_train, X_test, y_train, k=1)
+1 - (mean(y_test == knn_preds))  # error rate
+```
+
+This error rate seems low, but it doesn't seem that great when we remember that since only 6% of customers bought caravan insurance, the error rate for a classifier that only predicted `No` would be 6%.
+
+Let's see how good the classifier is at predicting customers who will actually buy insurance.
+
+```{r}
+table(knn_preds, y_test)
+```
+
+And so, of the 77 people we predicted to buy insurance, 9 actually did, for a rate of 9/77 which is about 12%. Had we just guessed `Yes` randomly, we would've been right only 6% of the time, so our classifier does twice as good in this case.
+
+```{r}
+# Let's try different values of k...
+knn_preds = knn(X_train, X_test, y_train, k=3)
+table(knn_preds, y_test)
+
+knn_preds = knn(X_train, X_test, y_train, k=5)
+table(knn_preds, y_test)
+```
+
+Respectively, we get rates of about 19% and 27% with k=3 and k=5. (These rates are the same as the one discussed above... the proportion of correct predictions to buy interest). Big improvements!
+
+```{r}
+#model
+glm_fit = glm(Purchase~., data=Caravan, subset=-test_indices, family=binomial)
+glm_probs = predict(glm_fit, Caravan[test_indices, ], type='response')
+glm_pred = rep('No', 1000)
+glm_pred[glm_probs > 0.5] = 'Yes'
+table(glm_pred, y_test)
+```
+
+Unfortunately here we are wrong 100% of the time.
+
+```{r}
+glm_pred = rep('No', 1000)
+glm_pred[glm_probs > 0.25] = 'Yes'
+table(glm_pred, y_test)
+
+11/33  # success rate
+```
+
+Here, our success rate is 1/3. This is better than what we saw above with KNN!

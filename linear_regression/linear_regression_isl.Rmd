@@ -1,0 +1,171 @@
+---
+title: "linear_regression_isl"
+output: github_document
+---
+
+# ISL Lab: Linear Regression
+
+```{r}
+library(MASS)
+library(ISLR)
+```
+
+```{r}
+# inspect data
+print(head(Boston))
+print(names(Boston))
+```
+
+## Simple Linear Regression
+
+```{r}
+# regression: predict median house value for Boston neighborhoods
+lm.fit=lm(medv~lstat, data=Boston)  # lstat is the percentage of households with low socioeconomic status
+attach(Boston)  # attaches data frame to current environment
+lm.fit=lm(medv~lstat)
+summary(lm.fit)
+```
+
+```{r}
+names(lm.fit)  # attributes
+coef(lm.fit)  # coefficients
+confint(lm.fit)  # 95% confidence interval for coefficient estimates
+```
+
+```{r}
+# prediction intervals of medv for various values of lstat
+predict(lm.fit, data.frame(lstat=(c(5, 10, 15))), interval='prediction')
+```
+
+For example, the 95% prediction interval for the `lstat` value of 5 is (17.57, 42.04).
+
+```{r}
+# plotting the variables and the least squares regression line
+plot(lstat, medv)
+abline(lm.fit)
+# random plotting testing
+abline(lm.fit, lwd=3)
+abline(lm.fit, lwd=3, col='red')
+plot(lstat, medv, col="red")
+plot(lstat, medv, pch=20)
+plot(lstat, medv, pch="+")
+plot(1:20, 1:20, pch=1:20) # woah
+```
+
+Note: evidence of non-linearity in residual plots
+
+```{r}
+# diagnostic plots
+par(mfrow=c(2, 2))
+plot(lm.fit)
+```
+
+```{r}
+# other residuals options
+plot(predict(lm.fit), residuals(lm.fit))
+plot(predict(lm.fit), rstudent(lm.fit))  # studentized residuals
+```
+
+Importantly, the residual plots above suggest there may be non-linearity in this relationship, since the residuals aren't randomly scattered.
+
+```{r}
+plot(hatvalues(lm.fit))
+which.max(hatvalues(lm.fit))
+```
+
+## Multiple Linear Regression
+
+```{r}
+lm.fit = lm(medv~lstat+age, data=Boston)
+summary(lm.fit)
+```
+
+```{r}
+lm.fit=lm(medv~., data=Boston)
+summary(lm.fit)
+```
+
+Interestingly, `age` was significant in the first multiple regression but not in this one.
+
+```{r}
+summary(lm.fit)$sigma
+summary(lm.fit)$r.sq
+```
+
+```{r}
+library(car)
+vif(lm.fit)  # variance inflation factor for predictors
+```
+
+```{r}
+# going back to age's high p-value noted earlier, let's run a regression excluding it
+lm.fit1 = lm(medv~.-age, data=Boston)
+summary(lm.fit1)
+```
+
+All coefficients are significant except for that of `indus`.
+
+## Interaction Terms
+
+```{r}
+summary(lm(medv~lstat*age, data=Boston))  # includes lstat, age, and lstat*age as predictors
+```
+
+The F-statistic is much greater than 1, indicating there is a relationship between the response and at least one of the predictors. Based on what we've already seen, `age` doesn't seem that useful, so `lstat` is probably more powerful.
+
+## Non-linear Transformations
+
+```{r}
+# regress medv onto lstat and lstat^2
+lm.fit2 = lm(medv~lstat+I(lstat^2))
+summary(lm.fit2)
+```
+
+The p-value for the squared term means our model is probably better now!
+
+```{r}
+# use anova function to analyze difference
+lm.fit = lm(medv~lstat)
+anova(lm.fit, lm.fit2)
+```
+
+This performs a hypothesis test testing the null: the two models are equally good, versus the alternative: the "bigger" model is superior. Because of the high F-statistic and its very low p-value, the bigger model is better. Given we saw earlier in the residuals evidence of non-linearity, this is not surprising.
+
+```{r}
+par(mfrow=c(2,2))
+plot(lm.fit2)
+```
+
+In the residuals plot, we see random scatter, and in the QQ plot, more of a straight line, both indicating improvement!
+
+```{r}
+# higher order polynomial syntax, fifth degree
+lm.fit5 = lm(medv~poly(lstat, 5))
+summary(lm.fit5)
+```
+
+Looks like we see some improvement...
+
+```{r}
+# log transformation
+summary(lm(medv~log(rm), data=Boston))
+```
+
+## Qualitative Predictors
+
+```{r}
+# Using the Carsets dataset to predict child car seat Sales in 400 locations based on various predictors
+names(Carseats)
+```
+
+```{r}
+# see that R generates dummy variabels automatically
+lm.fit = lm(Sales~.+Income:Advertising+Price:Age, data=Carseats)
+summary(lm.fit)
+```
+
+```{r}
+contrasts(Carseats$ShelveLoc)  # see encoding
+```
+
+A `Bad` ShelveLoc corresponds to the other dummy variables being 0. We note the coefficients of the dummy variables are positive (with `ShelveLocGood` being higher, which makes sense), meaning that a good shelving location is associated with better sales relative to a bad one.
