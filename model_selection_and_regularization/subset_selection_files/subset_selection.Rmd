@@ -1,0 +1,202 @@
+---
+title: "linear_model_selection"
+output: github_document
+---
+
+# Lab 1: Subset Selection Methods
+
+### Best Subset Selection: We use the `Hitters` data set to predict `Salary` based on the previous year's statistics.
+
+```{r}
+library(ISLR)
+names(Hitters)
+head(Hitters)  # We see sone missing values in the response column...
+# Calculate # of NAs in Salary
+sum(is.na(Hitters$Salary))
+```
+
+To address this problem, we'll drop rows with missing values.
+
+```{r}
+hitters = na.omit(Hitters)
+nrow(Hitters) - nrow(hitters)  # Kind of interestingly, all rows with missing values had missing values in Salary
+```
+
+```{r}
+# Now we perform best subset selection using the regsubsets() function of the leaps library
+library(leaps)
+regfit_full = regsubsets(Salary~., data=hitters)
+summary(regfit_full)
+```
+
+The asterisks indicate which variables are included in which model. And the function `regsubsets()` will only report up to 8 variables. If we use `nvmax()`, we can include more:
+
+```{r}
+regfit_full_max = regsubsets(Salary~., data=hitters, nvmax=19)
+summary(regfit_full_max)
+```
+
+This is the result if we consider subsets of size 19 using the `nvmax` paramater. So, since we have 19 models, the question becomes which one is best. We can look at statistics like the adjsusted-R-squared value and more to decide.
+
+```{r}
+# statistics that will help us decide 
+names(summary(regfit_full_max))
+summary(regfit_full_max)$rsq  # R-squared value
+```
+
+The R-squard values increase as we use more variables, as expected.
+
+```{r}
+# Let's plot the RSS, adjusted-R-squared, C_p, and BIC to help us decide which model to use.
+par(mfrow=c(2, 2))
+
+plot(summary(regfit_full_max)$rss ,xlab="Number of Variables ",ylab="RSS",
+type="l")
+
+plot(summary(regfit_full_max)$adjr2 ,xlab="Number of Variables ",
+ylab="Adjusted RSq",type="l")
+
+which.max(summary(regfit_full_max)$adjr2)
+points(11, summary(regfit_full_max)$adjr2[11], col="red", cex=2,pch=20)
+``` 
+
+And so we see that the adjusted-R-squared value achieves its max at 11 variables. Let's do the same for the $C_p$ and $BIC$ statistics, for which we want the min.
+
+```{r}
+par(mfrow=c(2, 2))
+plot(summary(regfit_full_max)$cp, xlab="Number of Variables ",ylab="Cp",
+type="l")
+min1 = which.min(summary(regfit_full_max)$cp)
+points(min1, summary(regfit_full_max)$cp[min1], col="red", cex=2,pch=20)
+
+plot(summary(regfit_full_max)$bic, xlab="Number of Variables ",ylab="BIC",
+type="l")
+min2 = which.min(summary(regfit_full_max)$bic)
+points(min2, summary(regfit_full_max)$bic[min2], col="red", cex=2,pch=20)
+```
+
+So, $C_p$ achieves its min at 10 variables, and $BIC$ at 6.
+
+```{r}
+# Use regsubsets built-in plot function to examine variables
+plot(regfit_full_max, scale="r2")
+plot(regfit_full_max, scale="bic")
+plot(regfit_full_max, scale="Cp")
+plot(regfit_full_max, scale="adjr2")
+```
+
+In these plots plot, each row is a model. The variable is included if its square is black. In the $BIC$ plot, there are several models that show -150 BIC. However, the top row will be the lowest, and includes the 6 variables AtBat, Hits, Walks, CRBI, DivisionW, and PutOuts (and the intercept of course). 
+
+```{r}
+# Show coefficients
+coef(regfit_full_max, 6)
+```
+
+### Forward and Backward Stepwise Selection
+
+```{r}
+# Forward and backward selection
+regfit_fwd = regsubsets(Salary~., data=hitters, nvmax=19, method='forward')
+summary(regfit_fwd)
+
+regfit_bwd = regsubsets(Salary~., data=hitters, nvmax=19, method='backward')
+summary(regfit_bwd)
+```
+
+With these results, we note that the models are the same up to the 7th predictor, when they differ. This includes the 7 variable best subset selection model. We can look at the variables and their coefficients like this:
+
+```{r}
+coef(regfit_full_max, 7)
+
+coef(regfit_fwd, 7)
+
+coef(regfit_bwd, 7)
+```
+
+For example, the best subset selection model includes `CAtBat` and `CHmRun`, which the others don't. The forward subset selection model is the same as backward selection except it has `CRBI`, while the backward method has `CRuns` instead.
+
+#### Now, let's use the validation set approach and then cross-validation to choose the best model.
+
+```{r}
+set.seed(1)
+# Make training and validation sets
+train = sample(c(TRUE, FALSE), nrow(hitters), rep=T)
+test = !train
+
+# best subset selection model
+regfit_best = regsubsets(Salary~., data=hitters[train, ], nvmax=19)
+
+# model matrix from test data
+test_mat = model.matrix(Salary~., data=hitters[test, ])
+
+val_errors = rep(NA, 19)
+for (i in 1:19) {
+  coef_i = coef(regfit_best, id=i)  # coefficients of model for best size i
+  pred = test_mat[ , names(coef_i)] %*% coef_i
+  val_errors[i] = mean((hitters$Salary[test] - pred)^2)  # MSE on validation set
+}
+
+val_errors
+which.min(val_errors)
+coef(regfit_best, 10)
+```
+
+This 10 variable model is the best cross-validation model. Now, we perform best subset selection on the full data set and select the best 10 variable model. Using the full data set this time allows us to obtain better coefficient estimates.
+
+```{r}
+# perform best subset selection on the whole data set and then select the best 10 variable model
+regfit_best = regsubsets(Salary~., data=hitters, nvmax=19)
+coef(regfit_best, 10)
+```
+
+Interestingly, the predictors in this model are different than what we saw above in the validation 10 variable model. This is why we did this step.
+
+Now, we'll do the same but with the k-Fold Cross-Validation approach.
+
+```{r}
+# predict() function from p. 249 we'll use later
+predict_regsubsets = function(object, newdata, id, ...) {
+  form = as.formula(object$call[[2]]) 
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id=id)
+  xvars = names(coefi)
+  return(mat[ , xvars] %*% coefi)
+}
+```
+
+
+```{r}
+k = 10
+set.seed(1)
+folds = sample(1:k, nrow(hitters), replace=TRUE)
+cv_errors = matrix(NA, nrow=k, ncol=19, dimnames=list(NULL, paste(1:19)))
+
+# perform cross-validation
+for (j in 1:k) {
+  best_fit = regsubsets(Salary~., data=hitters[folds != j, ], nvmax=19)
+  for (i in 1:19) {
+    pred = predict_regsubsets(best_fit, hitters[folds == j,], id=i)
+    cv_errors[j, i] = mean((hitters$Salary[folds == j] - pred)^2)
+  }
+}
+
+cv_errors  # the i,jth entry is the cross-validation error of the model of the ith fold with the best j variables
+```
+
+```{r}
+# average over the columns to see which number of variables is best
+mean_cv_errors = apply(cv_errors, MARGIN=2, FUN=mean)
+mean_cv_errors
+which.min(mean_cv_errors)
+par(mfrow =c (1,1))
+plot(mean_cv_errors)
+```
+
+We see from the plot that cross-validation selects an 11 variable model. Again, we use all of the training data to find the best coefficient estimates. Let's see what we get.
+
+```{r}
+reg_best = regsubsets(Salary~., hitters, nvmax=19)
+coef(reg_best, 11)
+```
+
+Final note: it's interesting that with the validation set approach, we ended up with a 10 variable model, and with 10-fold CV, we ended up with 11 variables. Because with 10-fold CV we trained and tested 10 times, I think its model is more trustworthy.
