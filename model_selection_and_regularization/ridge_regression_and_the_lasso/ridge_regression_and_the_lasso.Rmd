@@ -1,0 +1,8 @@
+---
+title: "ridge_regression_and_the_lasso.Rmd"
+output: github_document
+---
+
+# Lab 2: Ridge Regression and the Lasso
+
+### Ridge Regression
