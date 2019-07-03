@@ -1,0 +1,95 @@
+---
+title: "pcr_and_pls.Rmd"
+output: github_document
+---
+
+# Lab 3: Principal Components and Partial Least Squares Regression
+
+### Principal Components Regression: again we will use the `Hitters` data set to predict `Salary`.
+
+```{r}
+# load pls library, which contains the pcr() function, and ISLR library
+library(pls)
+library(ISLR)
+set.seed(2)
+# Remove missing vals
+hitters = na.omit(Hitters)
+```
+
+```{r}
+# Fit pcr model
+pcr_fit = pcr(Salary~., data=hitters, scale=T, validation='CV')  # scale=T standardizes each predictor, and validation='CV' employs 10-fold CV to choose M, the number of principal components
+summary(pcr_fit)
+```
+
+We note that the cross-validation scores given use the root mean square error, not the mean square error which we have been analyzing so far. We can just square these quantities to get the usual MSE.
+
+We can also plot the CV scores:
+
+```{r}
+validationplot(pcr_fit, val.type='MSEP')
+min = which.min(summary(pcr_fit))
+```
+
+On the y-axis we have MSE, and so we see it reaches a minimum at 16 components. This isn't much less than the MSE at 19 components, which corresponds to using OLS. 
+
+We also see that the `summary()` function tells us the % variance explained in the predictors and in the response, Salary. For example, using 2 principal components explains 60.16% of the variance in the predictors, while using 19 explains all (since all are included). An analogous interpretation goes for the numbers corresponding to Salary.
+
+Now let's perform PCR on the training data and assess its performance on the test set.
+
+```{r}
+# Make train and test
+set.seed(1)
+X = model.matrix(Salary~., data=hitters)[ , -1]  # drop intercept column
+y = hitters$Salary
+train = sample(1:nrow(X), nrow(X)/2)
+test = -train
+
+pcr_fit = pcr(Salary~., data=hitters, subset=train, scale=T, validation='CV')
+validationplot(pcr_fit, val.type='MSEP')
+```
+
+Now, we see the minimum MSE comes with 7 components. Let's calculate the test MSE now for 7 components.
+
+```{r}
+pcr_preds = predict(pcr_fit, X[test, ], ncomp=7)
+mean((pcr_preds - y[test])^2)
+```
+
+This test MSE is similar to what we saw with ridge and lasso regularization. However, PCR is harder to interpret than something like lasso because it doesn't perform variable selection, nor does it directly give coefficient estimates. For this reason we might prefer those approaches.
+
+Now we fit PCR on the whole data set, using 7 components. 
+
+```{r}
+pcr_fit = pcr(y~X, scale=T, ncomp=7)
+summary(pcr_fit)
+```
+
+### Partial Least Squares
+
+```{r}
+# partial least squares on the training set uses the pls() function, also in the pls library
+set.seed(1)
+pls_fit = plsr(Salary~., data=hitters, subset=train, scale=T, validation='CV')
+summary(pls_fit)
+```
+
+```{r}
+validationplot(pls_fit, val.type='MSEP')
+```
+
+We see that choosing $M = 2$ components gives the lowest CV MSE. Now let's calculate the test MSE for 2 components.
+
+```{r}
+pls_preds = predict(pls_fit, X[test, ], ncomp=2)
+mean((pls_preds - y[test])^2)
+```
+
+This test MSE is a bit higher than PCR, Lasso, and Ridge. Now we'll fit a pls model of 2 components to the whole data set.
+
+```{r}
+pls_fit = plsr(y~X, scale=T, ncomp=2)
+summary(pls_fit)
+```
+
+It's important to note that the % variance explained in y for PLS with 2 components here is 46.40%, which is barely less than the 46.69% of the 7 component PCR regression we did early. This is because PLS seeks for directions, or linear combinations, that maximize variance explained in both the predictors and the response, while PCR only seeks those that maximize variance in the predictors.
