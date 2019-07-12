@@ -1,0 +1,251 @@
+---
+title: "non_linear_models.Rmd"
+output: github_document
+---
+
+# Lab: Non-linear Modeling
+
+### In this lab, we analyze the `Wage` data set using non-linear fitting methods discussed in chapter 7. First, we'll start with polynomial regression and step functions.
+
+```{r}
+library(ISLR)
+
+# polynomial regression
+poly_fit = lm(wage~poly(age, 4), data = Wage)
+summary(poly_fit)
+```
+
+Using `poly()` in its default form allows us to see the significance of each term in the model because it returns a matrix whose columns are a basis of orthogonal polynomials (need to do more research on this)... if we set `raw=T` withing `poly()`, this is not the case and the coefficients are those of the raw polynomials. We note this doesn't change the fitted values.
+
+```{r}
+poly_fit_raw = lm(wage~poly(age, 4, raw=T), data = Wage)
+summary(poly_fit_raw)
+```
+
+We see different coefficients (and everything else is differnt too) now! This method is really only useful if we need to see the raw coefficient estimates. Using the default `raw=F` gives us an easier-to-interprate regression, which is often more desirable.
+
+```{r}
+# Now let's make predictions from ages 18-80 and plot our results versus the observed data!
+age_lims = range(Wage$age)
+age_grid = seq(age_lims[1], age_lims[2])
+preds = predict(poly_fit, newdata=list(age=age_grid), se=T)
+# Generate standard error bounds
+se_bands = cbind(preds$fit + 2*preds$se.fit, preds$fit - 2*preds$se.fit)
+
+# Plot
+par(mfrow=c(1, 2), mar=c(4.5, 4.5, 1, 1), oma=c(0, 0, 4, 0))
+plot(Wage$age, Wage$wage, xlim=age_lims, cex=0.5, col='darkgrey')
+title("Degree-4 Polynomial", outer=T)
+lines(age_grid, preds$fit, lwd=2, col='blue')
+matlines(age_grid, se_bands, lwd=1, col='blue', lt=3)
+```
+
+This is just like the figure we saw in the book! It's cool to observe how our model looks against the data.
+
+Now we explore using different degrees of polynomials. We want the lowest polynomial that explains the relationship between wage and age sufficiently well. We can do this with hypothesis tests, specifically using the `anova()` function, which performs F-tests with the null: simpler model is sufficent, and the alternative: a more complex model is necessary. So, to do this, we fit 5 models, one for each degree polynomial (up to 5), and then we use the ANOVA function to compare.
+
+```{r}
+fit1 = lm(wage~age, data = Wage)
+fit2 = lm(wage~poly(age, 2), data=Wage)
+fit3 = lm(wage~age + I(age^2) + I(age^3), data=Wage)  # recall this syntax
+fit4 = lm(wage~poly(age, 4), data=Wage)
+fit5 = lm(wage~poly(age, 5), data=Wage)
+anova(fit1, fit2, fit3, fit4, fit5)
+```
+
+To interpret this, we look at the p-values. The hypothesis test comparing model 1 to model 2 is virtually 0, meaning a linear fit doesn't suffice. The one for model 2 vs. model 3 is also quite low, indicating a quadratic fit doesn't do the job. The one for model 3 vs. 4 is about 5%, and the one for model 4 vs. 5 is about 37%. The latter clearly shows a 5th degree polynomial is too much, and so we are left with a choice between the cubic and degree 4 polynomial. Either is a good choice. 
+
+Importantly, we note that we could've gotten these p-values using just the following: 
+
+```{r}
+summary(fit5)
+```
+
+This is because the default way of using `poly()` uses orthogonal polynomials. However, ANOVA works in a more general case, including if we added more predictors. 
+
+Finally, we could've also used our handy cross-validation tool to choose the polynomial degree, which we have seen many times in the recent labs. 
+
+#### Now, let's handle a logistic regression problem: predicting if an individual will make >$250,000 per year.
+
+```{r}
+logistic_fit = glm(I(wage>250)~poly(age, 4), data=Wage, family = binomial)  # We just use 250 since wage is given in thousands of dollars. Also I() creates a logical vector, and glm() converts the TRUEs and FALSEs to 1s and 0s for us.
+
+# predictions
+preds = predict(logistic_fit, newdata=list(age=age_grid), se=T)  # these are the log-odds predictions
+
+# transform from log-odds to normal probabilities with sigmoid function
+good_preds = exp(preds$fit)/(1 + exp(preds$fit))
+se_bands_log_odds = cbind(preds$fit + 2*preds$se.fit, preds$fit - 2*preds$se.fit)
+good_se_bands = exp(se_bands_log_odds)/(1 + exp(se_bands_log_odds))
+
+# Plot
+plot(Wage$age, I(Wage$wage > 250) ,xlim = age_lims, type="n", ylim=c(0, .2))
+points(jitter(Wage$age), I((Wage$wage > 250) / 5), cex=0.5, pch="|", col = "darkgrey")
+lines(age_grid, good_preds , lwd=2, col="blue")
+matlines(age_grid, good_se_bands, lwd=1, col="blue", lty=3)
+```
+
+Cool! Just like what we saw earlier in the chapter.
+
+#### Now, let's fit a step function. Yes, we saw this method is inadequate for this situation, but it's useful to know how to do it in R.
+
+```{r}
+# See frequency of observations in each age bin. Here we let cut create 5 bins automatically.
+table(cut(Wage$age, 5))  # cut() returns an ordered categorical variable
+
+# Step function model uses lm(), and employs dummy variables to handle the bins
+fit = lm(wage~cut(age, 4), data=Wage)
+coef(summary(fit))
+```
+
+The only important thing to remember here is that the `age < 33.5` bin information is in the intercept, i.e. the average wage of someone younger than 33.5 is a little over $94,000.
+
+### Now we consider the same problem, but this time use splines as our learning method!
+
+First we look at regression splines, which we remember are constructed from an approprite choice of basis functions. R employs cubic splines by default.
+
+```{r}
+library(splines)
+
+fit = lm(wage~bs(age, knots=c(25, 40, 60)), data=Wage)  # bs() generates matrix of basis functions with the knots we choose
+preds = predict(fit, newdata = list(age = age_grid), se=T)
+plot(Wage$age, Wage$wage, col='gray')
+lines(age_grid, preds$fit,lwd=2)
+lines(age_grid, preds$fit + 2*preds$se, lty="dashed")
+lines(age_grid, preds$fit - 2*preds$se, lty="dashed")
+title('Cubic Spline')
+```
+
+If instead of specifying our own knots we wanted R to choose them uniformly, we can set our desired value of degrees of freedom. We remember that a cubic spline has K+4 degrees of freedom in general, where K is the number of knots. This is because there are K+3 predictors, each of which is a basis function, and we are left with the intercept term. 
+
+```{r}
+# use df argument to choose knots uniformly
+dim(bs(Wage$age, df=6))  # df=6 means 6 basis functions, i.e. 3 knots
+attr(bs(Wage$age, df=6), "knots")
+```
+
+So, we see the 25th, 50th, and 75th percentiles of age, which correspond to 33.8, 42, and 51 respectively. These would be our knots in this cubic spline. 
+
+If we wanted to, we could use `bs()`'s `degree` parameter to fit a spline of any degree, but we just use the default of 3 here.
+
+Now, let's fit a natural spline!
+
+```{r}
+natural_spline_fit = lm(wage~ns(age, df=4), data=Wage)  # natural spline uses ns(), and here we use 4 degrees of freedom, i.e. 1 knot
+natural_preds = predict(natural_spline_fit, newdata=list(age = age_grid), se=T)
+plot(Wage$age, Wage$wage, col='gray')
+lines(age_grid, natural_preds$fit,lwd=2)
+lines(age_grid, natural_preds$fit + 2*natural_preds$se, lty="dashed")
+lines(age_grid, natural_preds$fit - 2*natural_preds$se, lty="dashed")
+title('Natural Spline')
+```
+
+```{r}
+# Let's plot the results of a smoothing spline
+plot(Wage$age, Wage$wage, xlim = age_lims, cex=0.5, col="darkgrey")
+title ("Smoothing Spline")
+fit = smooth.spline(Wage$age, Wage$wage, df=16)  # fit smoothing spline with 16 DoF, R determines the corresponding value of lambda
+fit2 = smooth.spline(Wage$age, Wage$wage, cv=TRUE)  # uses cross-validation to pick lambda, resulting in 6.8 DoF 
+fit2$df
+lines(fit, col="red", lwd=2)
+lines(fit2, col="blue", lwd=2)
+legend("topright", legend=c("16 DF","6.8 DF"), col=c("red","blue"), lty=1, lwd=2, cex=.8)
+```
+
+Finally, let's see local regression.
+
+```{r}
+plot(Wage$age, Wage$wage, xlim=age_lims, cex=.5, col="darkgrey")
+title("Local Regression")
+fit = loess(wage~age, span=0.2, data=Wage)  # fit local regression with 0.2 span
+fit2 = loess(wage~age, span=0.5, data=Wage)  # another local regression, this one with 0.5 span
+lines(age_grid, predict(fit, data.frame(age=age_grid)), col="red", lwd=2)
+lines(age_grid, predict(fit2, data.frame(age=age_grid)), col="blue", lwd=2)
+legend("topright" ,legend = c("Span=0.2","Span=0.5"), col = c("red","blue"), lty=1, lwd=2, cex=.8)
+```
+
+The key thing to remember here is that the `span` parameter tells us the proportion of points used in each neighborhood. That is, a span of 0.2 means 20% of observations are used in each neighborhood, and a span of 0.5 means 50%. The higher the span, the smoother the fit, which is intuitive!
+
+### GAMs
+
+First, we'll predict wage using natural splines with the predictors year and age, and we'll use a step function on education. This is basically just a big linear regression with a choice of basis functions, so we use `lm()`. 
+
+```{r}
+gam1 = lm(wage~ns(year, 4) + ns(age, 5) + education, data=Wage)
+coef(summary(gam1))
+```
+
+But, if we want to use smoothing splines, or just any method that doesn't solely depend on a choice of basis functions that can be fit with OLS, we have to use the `gam` library. Let's see this now.
+
+```{r}
+library(gam)
+gam2 = gam(wage~s(year, 4) + s(age, 5) + education, data=Wage)  # s() indicates smoothing spline with corresponding DoF, and education is qualitative
+
+# plot results
+par(mfrow=c(1, 3))
+plot(gam2, se=T, col='blue')
+```
+
+Cool plot! Interestingly, even though `gam1` isn't of class `gam` (it's of `lm`), we can still use `plot.Gam()` to plot it:
+
+```{r}
+plot.Gam(gam1, se=T, col='red')
+```
+
+Nice! We notice `year` looks linear, so maybe we should run an ANOVA test to see if it's worth including in our model.
+
+```{r}
+# Run ANOVA to see if year predictor is valuable
+gam_m1 = gam(wage~s(age, 5) + education, data=Wage)  # no year
+gam_m2 = gam(wage~year + s(age, 5) + education, data=Wage)  # linear function of year
+anova(gam_m1, gam_m2, gam2, test="F")  # smoothing spline of year 
+```
+
+Looking at the p-values, we see that the model using a linear function of year is better than not including it at all. Then, we see that the third model that uses a smoothing spline of year doesn't convince us that it should be used over model 2, because p=0.35. So, we'll pick model 2.
+
+```{r}
+# summary of model 2
+summary(gam_m2)
+```
+
+The small p-values here support our conclusion.
+
+```{r}
+# Make predictions... same way as with lm() objects
+gam_preds = predict(gam_m2, newdata=Wage)
+```
+
+```{r}
+# Local regression and GAMs
+gam_lo = gam(wage~s(year, df=4) + lo(age, span=0.7) + education, data=Wage)  # lo() function performs local regression with chosen span
+plot.Gam(gam_lo, se=T, col='green')
+
+# Can also use interaction term in lo()
+gam_inter_lo = gam(wage~lo(year, age, span=0.5) + education, data=Wage)
+# Plot
+library(akima)
+plot(gam_inter_lo)  # plots 2D surface of interaction term
+```
+
+```{r}
+# Logistic regression and GAMs
+gam_lr = gam(I(wage > 250)~year + s(age, df=5) + education, family=binomial, data=Wage)
+par(mfrow = c(1, 3))
+plot(gam_lr, se=T, col="green")
+``` 
+
+The SE bar for `<HS` is so wide because there are no observations in this category that earn over $250,000 per year.
+
+```{r}
+# we see the # of earners of over 250k here
+table(Wage$education, I(Wage$wage > 250))  # indicator variable that table() uses to count TRUEs and FALSEs as 1s and 0s
+```
+
+This table confirms our observation. Given this, we can fit a GAM that excludes this subset of our observations to get better results.
+
+```{r}
+gam_lr_s = gam(I(wage > 250)~year + s(age, df=5) + education, data=Wage, family=binomial, subset = (education != '1. < HS Grad'))  # fancy subsetting syntax...
+plot(gam_lr_s, se=T, col="green")
+```
+
+And just like that, the super wide error bars for `< HS Grad` are gone! These results make sense. Overall, the flexibility of GAMs is actually really cool and nice. Using multiple learning methods in one model for different predictors, whether quantitative or categorical, all at the same time preserving easy inference... is super interesting!
