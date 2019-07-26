@@ -1,0 +1,119 @@
+---
+title: "pca_clustering_example.Rmd"
+output: github_document
+---
+
+# PCA and Clustering Example: Genomic Data
+
+### In this lab, we'll use PCA and clustering on the `NCI60` cancer data, which consists of 6,830 gene measurements on 64 cancer cell lines.
+
+```{r}
+# load data
+library(ISLR)
+nci_labs = NCI60$labs
+nci_data = NCI60$data
+dim(nci_data)
+```
+
+```{r}
+# frequencies of cancer types
+table(nci_labs)
+```
+
+#### Let's start our analysis with PCA
+
+```{r}
+pca_out = prcomp(nci_data, scale=T)  # scale variables to have SD 1 (maybe not necessary)
+
+
+# plotting code not working :(
+
+# function that assigns a distinct color to each element of a numeric vector, for plotting
+#colors = function(vec) {
+#  cols = rainbow(length(unique(vec)))
+#  return(cols[as.numeric(as.vector(vec))])
+#}
+
+# plot 
+#par(mfrow = c(1, 2))
+
+#plot(pca_out$x[, 1:2], col=colors(nci_labs), pch=19, xlab="Z1", ylab="Z2")
+
+#plot(pca_out$x[, c(1,3)], col=colors(nci_labs), pch=19, xlab="Z1", ylab="Z3")
+```
+
+```{r}
+# check PVE
+summary(pca_out)
+
+# plot pve
+pve = 100*pca_out$sdev^2 / sum(pca_out$sdev^2)
+par(mfrow=c(1,2))
+plot(pve, type="o", ylab="PVE", xlab="Principal Component", col =" blue ")
+plot(cumsum(pve), type="o", ylab="Cumulative PVE", xlab="Principal Component ", col =" brown3 ")
+```
+
+Based on these plots, it seems that after about the 7th PC, there is a substantial decrease in the variance explained by each PC. Given this, it might not be worth trying to include more PCs in the low-dimensional representation of our data!
+
+#### Let's cluster the data hierarchically now!
+
+```{r}
+# standardize data to have mean 0 and SD 1
+standard_data = scale(nci_data)
+
+# Use euclidean distance and complete, single, and average linkage
+par(mfrow=c(1,3))
+data.dist = dist(standard_data)  # euclidean distance
+plot(hclust(data.dist), labels=nci_labs, main="Complete Linkage", xlab="", sub="",ylab="")
+plot(hclust(data.dist, method="average"), labels=nci_labs, main="Average Linkage", xlab="", sub="", ylab="")
+plot(hclust(data.dist, method="single"), labels=nci_labs, main="Single Linkage", xlab="", sub="", ylab="")
+```
+
+So now we have our 3 dendrograms! Yes, they are hard to read (and I'm not exactly sure how to fix this... a better picture is on p. 411 of the book). It seems that single linkage isn't yielding balanced clusters. That is, there is a large cluster with many observations "tacked on" one-by-one. However, complete and average linkage seem to give us more balanced clusters. This may be preferrable. 
+
+Now we must cut the dendrograms.
+
+```{r}
+hc_out = hclust(dist(standard_data))
+hc_clusters = cutree(hc_out, 4)  # specifying that we want to cut at the level which will yield 4 clusters
+table(hc_clusters, nci_labs)
+```
+
+We see some interesting patterns from this table. For example, all leukemia cell lines lie in cluster 3, all melanoma in cluster 1, and all ovarian in cluster 1. Meanwhile, breast cancer cell lines are spread over 3 clusters.
+
+Let's plot the cut that resulted in these 4 clusters.
+
+```{r}
+par(mfrow=c(1,1))
+plot(hc_out, labels=nci_labs) > abline(h=139, col="red")  
+```
+
+```{r}
+# nice summary of what we've done
+hc_out
+```
+
+To check against the other clustering method we've seen, let's examine the results of K-means clustering with K=4.
+
+```{r}
+set.seed(2)
+k_means_out = kmeans(standard_data, 4, nstart=20)
+k_means_clusters = k_means_out$cluster
+table(k_means_clusters, hc_clusters)
+```
+
+We see a few discrepancies here. For example, of all observations in the K-means first cluster, 11 are in the hierarchically clustered first cluster, and 9 in its 4th. And, The third K-means cluster is identical to the first hierarchically clustered cluster. Hence, we see that these clustering methods can give pretty different results!
+
+To finish the lab, we'll go full circle and end up back on PCA. Let's hierarchically cluster on the first few principal component score vectors! 
+
+```{r}
+hc_pca_mix = hclust(dist(pca_out$x[, 1:7]))  # Use first 7 PC score vectors
+plot(hc_pca_mix, labels=nci_labs, main="Hier. Clust. on First Seven Score Vectors ")
+table(cutree(hc_pca_mix, 4), nci_labs)
+```
+
+It's not surprising that these results are different than those we obtained when clustering on the entire data set. Sometimes, this can give better results since PCA can help us find the true "signal" in the data. And alternatively, we could've performed K-means clustering on the first few PCs. This concludes this example, and the book!
+
+Unsupervised learning has been an interesting topic, and especially this lab in particular, because there's no real way to assess which method performed better on the data. Why? There are no answers! And yes, although I read this in the book, it becomes more apparent when you're coding, doing analysis yourself and realizing that your analysis doesn't really come to any specific conclusions. I guess this is the challenge of unsupervised learning, though, and it's certainly different and interesint. 
+
+This is it for ISl. It's been a fun journey through the book, and I will be definitely be applying many of these techniques to some other personal projects!
