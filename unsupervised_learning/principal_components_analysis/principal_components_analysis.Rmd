@@ -1,0 +1,75 @@
+---
+title: "principal_components_analysis.Rmd"
+output: github_document
+---
+
+# Lab: Principal Components Analysis (PCA)
+
+### In this lab, we'll perform PCA on the `USArrests` data set.
+
+```{r}
+# examine data
+head(USArrests)
+states = row.names(USArrests)
+states
+```
+
+```{r}
+apply(USArrests, MARGIN=2, mean)
+apply(USArrests, MARGIN=2, var)
+```
+
+Our variables have very different means and variances. Furthermore, `UbranPop` is the percentage of the population living in urban areas, while the others are arrests per 100,000 people for that particular crime. So, they aren't on the same scale. These facts mean we should standardize the variables--otherwise, `Assault` woul be given far too much weight in the analysis since it has the highest mean and variance.
+
+```{r}
+# standardize
+pca_out = prcomp(USArrests, center=T, scale=T)  # make sure to standardize variables
+names(pca_out)
+
+# examine loading vectors
+pca_out$rotation
+```
+
+So, we see there are 4 principal components. The attribute `x` has the 4 score vectors as its columns.
+
+```{r}
+head(pca_out$x)
+```
+
+```{r}
+# plot first two principal components
+biplot(pca_out, scale=0)  # scale=0 ensures arrows are scaled to represent loadings 
+``` 
+
+We can flip the signs of the arrows to make the chart more interpretable, since principal components are unique up to a sign change.
+
+```{r}
+pca_out$rotation = -pca_out$rotation
+pca_out$x = -pca_out$x
+biplot(pca_out, scale=0)
+```
+
+This looks better! We interpret this the following way: The first loading vector places sigfnicant and near equal weight on `Rape`, `Assault`, and `Murder`. owever, it places much less on `UrbanPop`. This is because they are all centered around 1.5 or so. Statistically, this fact means that these variables are correlated with each other, which intuitively isn't much of a surprise. On the other hand, the opposite is true for the second loading vector, which heavily weighs `UrbanPop` and the others much less.  
+
+Now, we ask how we can find the proportion of variance explained (PVE) by each principal component. We can do so like this:
+
+```{r}
+# SDs of each principal component
+pca_out$sdev
+
+pca_var = pca_out$sdev^2  # square the SDs to get variances
+pve = pca_var/sum(pca_var)  # calculate proportions
+pve
+```
+
+```{r}
+# Plot PVE
+plot(pve, xlab="Principal Component", ylab="Proportion of Variance Explained ", ylim=c(0,1), type='b')
+
+# use cumsum() to flip the graph
+plot(cumsum(pve), xlab="Principal Component ", ylab=" Cumulative Proportion of Variance Explained ", ylim=c(0,1), type='b')  
+```
+
+From these plots, we see that between almost 90% of the variance in the data is captured by the first two principal components. This number seems pretty good, although we always have to keep in mind that there's no general rule for choosing the number of PCs to represent a data set. However, since about 90% is a lot and lets us make nice 2D plots, that's we've stuck with here!
+
+Most importantly, though, we've seen how PCA allows us to find a good low-dimensional representation of the data. By low-dimensional, we mean that we have found a way to represent our data with 2 variables rather than the original 4. And by "good", we mean that although the representation isn't perfect, it captures enough of the variance of the data well enough to be useful.
